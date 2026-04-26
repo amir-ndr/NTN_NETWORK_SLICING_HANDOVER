@@ -193,8 +193,8 @@ def handle_client(conn):
                 print(f"  ✗  {c['name']:<{col1}}UNREACHABLE")
 
         # ── Select ────────────────────────────────────────────────────────────
-        selected    = select_random(probed)
-        t_sel_ms    = (time.perf_counter() - t_in) * 1000.0
+        selected = select_random(probed)
+        t_sel_ms = (time.perf_counter() - t_in) * 1000.0
 
         if selected is None:
             print("\n  [ERROR] All chains unreachable — cannot route handover")
@@ -204,19 +204,52 @@ def handle_client(conn):
         print(f"     AMF={selected['amf_addr']}  "
               f"probe={selected['latencyMs']:.1f}ms  "
               f"policy=random  "
-              f"total_selection={t_sel_ms:.2f}ms")
+              f"selection={t_sel_ms:.2f}ms")
+
+        # ── Forward PathSwitchRequest to selected chain ───────────────────────
+        # This is the actual core network execution: chain queues the request,
+        # waits its turn, processes (AMF→SMF→UPF), and responds.
+        # This is Metric 01: dispatcher receives → UPF completes path switch.
+        chain_req = {
+            "type":        "PathSwitchRequest",
+            "ueId":        ue_id,
+            "sliceSst":    sst,
+            "sourceGnb":   src_gnb,
+            "targetGnb":   tgt_gnb,
+        }
+        chain_resp, chain_lat = wire_send_recv(
+            selected["probe_host"], selected["probe_port"],
+            chain_req, timeout=30.0
+        )
+
+        t_total_ms = (time.perf_counter() - t_in) * 1000.0
+
+        if chain_resp is None:
+            print(f"  [ERROR] Chain {selected['id']} failed to process request")
+            return
+
+        wait_ms = chain_resp.get("waitMs", 0.0)
+        svc_ms  = chain_resp.get("serviceMs", 0.0)
+
+        print(f"     chain_wait={wait_ms:.1f}ms  "
+              f"chain_svc={svc_ms:.1f}ms  "
+              f"chain_rtt={chain_lat:.1f}ms")
+        print(f"     total_core_latency={t_total_ms:.2f}ms")
         print(f"{'━'*62}")
 
         # ── Reply to gnb2 ─────────────────────────────────────────────────────
         resp = json.dumps({
-            "type":            "PathSwitchResponse",
-            "ueId":            ue_id,
-            "selectedChain":   selected["id"],
-            "selectedAmf":     selected["amf_addr"],
-            "chainName":       selected["name"],
-            "probeLatencyMs":  selected["latencyMs"],
-            "queueLen":        selected["queueLen"],
-            "selectionTimeMs": round(t_sel_ms, 2),
+            "type":             "PathSwitchResponse",
+            "ueId":             ue_id,
+            "selectedChain":    selected["id"],
+            "selectedAmf":      selected["amf_addr"],
+            "chainName":        selected["name"],
+            "probeLatencyMs":   selected["latencyMs"],
+            "queueLen":         selected["queueLen"],
+            "selectionMs":      round(t_sel_ms, 2),
+            "chainWaitMs":      round(wait_ms, 2),
+            "chainServiceMs":   round(svc_ms, 2),
+            "totalCoreMs":      round(t_total_ms, 2),
         }).encode()
         conn.sendall(struct.pack("!I", len(resp)) + resp)
 
