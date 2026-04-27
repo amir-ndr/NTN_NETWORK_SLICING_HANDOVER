@@ -1,0 +1,84 @@
+build/nr-cli UERANSIM-gnb-999-70-1 --exec "ue-release 1"
+
+# Step 1 — restart all Open5GS services
+sudo systemctl restart open5gs-nrfd open5gs-scpd open5gs-amfd \
+    open5gs-smfd open5gs-upfd open5gs-ausfd open5gs-udmd \
+    open5gs-udrd open5gs-pcfd open5gs-bsfd
+
+# Step 2 — wait 5 seconds, then start gNB1
+build/nr-gnb -c config/gnb1.yaml
+
+# Step 3 — start gNB2
+build/nr-gnb -c config/gnb2.yaml
+
+# Step 4 — wait for both to show "NG Setup procedure is successful"
+# THEN start UE
+sudo build/nr-ue -c config/ue1.yaml
+
+# Step 5 — create dummy interface
+sudo ip link add dummy0 type dummy
+sudo ip link set dummy0 up
+sudo ip addr add 10.99.0.1/24 dev dummy0
+
+# Step 6 — start monitor
+python3 ho_monitor.py
+
+#step 7
+sudo tc qdisc add dev dummy0 root netem delay 200ms loss 60%
+sudo tc qdisc del dev dummy0 root
+
+---------------------------------------------------------
+
+sudo ip link delete dummy0
+
+touch /tmp/degrade_signal
+To restore:
+bashrm /tmp/degrade_signal
+
+
+-------------------------------------------Xn-based HO-phase1-------------------------------
+
+Terminal 1
+# verify it's up
+sudo systemctl status open5gs-amfd
+
+Terminal 2
+# Need to add loopback alias for 127.0.0.2 if not already there
+sudo ip addr add 127.0.0.2/8 dev lo 2>/dev/null || true
+
+python3 ~/5g-lab/scripts/xn_server.py --host 127.0.0.2 --port 38422
+
+
+Terminal 3 — Source gNB (gnb1)
+
+cd ~/5g-lab/UERANSIM
+./build/nr-gnb -c config/gnb1.yaml
+
+Terminal 4 — UE
+
+
+cd ~/5g-lab/UERANSIM
+sudo ./build/nr-ue -c config/ue1.yaml
+Terminal 5 — Trigger handover manually
+
+
+cd ~/5g-lab/UERANSIM
+
+# First check UE ID
+./build/nr-cli UERANSIM-gnb-999-70-1 --exec "ue-list"
+
+# Then trigger Xn handover: ue-id=1, target=127.0.0.2, port=38422, sst=1
+./build/nr-cli UERANSIM-gnb-999-70-1 --exec "xn-handover 1 127.0.0.2 38422 1"
+
+What You Should See:
+
+In Terminal 3 (source gNB logs):
+
+
+Xn handover latency | ue=1 sst=1 | xn-prep=Xms psw=0ms release=Yms total=Zms
+In Terminal 2 (xn_server.py):
+
+
+[Xn] XnHandoverRequest received: {"type": "XnHandoverRequest", "ueId": 1, ...}
+[Xn] XnHandoverAck sent for UE 1
+----------------------------
