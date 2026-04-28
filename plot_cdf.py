@@ -23,20 +23,27 @@ matplotlib.rcParams.update({
 # Each CSV row: sst, prep_psw_ms, ue_switch_ms, release_ms, total_ms
 TOTAL_COL = 4   # 0-indexed column for total HO latency
 
+LAB = "/home/amirndr/5g-lab"
+
 if len(sys.argv) > 1:
     files = sys.argv[1:]
 else:
-    files = ["/home/amirndr/5g-lab/xn_ho_latency.csv"]
+    # Default: all three baselines side-by-side
+    files = [
+        f"{LAB}/xn_ho_latency_b1.csv",
+        f"{LAB}/xn_ho_latency_b2.csv",
+        f"{LAB}/xn_ho_latency_b3.csv",
+    ]
 
 labels = {
-    "/home/amirndr/5g-lab/xn_ho_latency.csv":    "B1 – Mono-chain (no dispatcher)",
-    "/home/amirndr/5g-lab/xn_ho_latency_b2.csv": "B2 – Random selection",
-    "/home/amirndr/5g-lab/xn_ho_latency_b3.csv": "B3 – Bregman online",
+    f"{LAB}/xn_ho_latency_b1.csv": "B1 – Mono-chain (no dispatcher)",
+    f"{LAB}/xn_ho_latency_b2.csv": "B2 – Random selection",
+    f"{LAB}/xn_ho_latency_b3.csv": "B3 – Bregman online",
 }
 styles = [
-    {"color": "#2196F3", "linestyle": "-"},
-    {"color": "#FF5722", "linestyle": "--"},
-    {"color": "#4CAF50", "linestyle": "-."},
+    {"color": "#2196F3", "linestyle": "-",  "linewidth": 2},
+    {"color": "#FF5722", "linestyle": "--", "linewidth": 2},
+    {"color": "#4CAF50", "linestyle": "-.", "linewidth": 2},
 ]
 
 fig, ax = plt.subplots(figsize=(7, 4.5))
@@ -63,7 +70,7 @@ for idx, fpath in enumerate(files):
 
     # Print summary stats
     print(f"{label}")
-    print(f"  n={len(total_ms)}  mean={total_ms.mean():.1f}ms  "
+    print(f"  n={len(total_ms)}  mean={total_ms.mean():.1f}ms  std={total_ms.std():.1f}ms  "
           f"p50={np.percentile(total_ms,50):.1f}ms  "
           f"p90={np.percentile(total_ms,90):.1f}ms  "
           f"p99={np.percentile(total_ms,99):.1f}ms")
