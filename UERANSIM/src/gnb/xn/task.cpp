@@ -276,25 +276,15 @@ void XnTask::handleConnection(int connFd)
     logger->info("Xn: HandoverAck | ue=%d sst=%d psw=%.1fms selectedAmf=%s",
                  ueId, sst, pswMs, selectedAmf.c_str());
 
-    // ── UeContextRelease (make-before-break) ──────────────────────────────────
-    // In 3GPP: sent after UE camps on gnb2 and gnb2→AMF PathSwitch completes.
-    // Here the PathSwitch (dispatcher) already completed above, so we send
-    // the release immediately — gnb1 is blocked waiting for this message.
-    std::string ctxRelease =
-        "{\"type\":\"UeContextRelease\""
-        ",\"ueId\":"    + ueIdStr +
-        ",\"cause\":\"successful_handover\""
-        "}";
-
-    SendMsg(connFd, ctxRelease);
-    logger->info("Xn: UeContextRelease sent to source gNB | ue=%d", ueId);
-    ::close(connFd);
-
     // ── Trigger NGAP PathSwitchRequest to AMF ────────────────────────────────
-    // Parse sessions from XnHandoverRequest: "psi,upTeid,upAddrHex,qfi1+qfi2|..."
+    // 3GPP order: PathSwitch FIRST, UeContextRelease to gnb1 only AFTER AMF
+    // confirms the path switch.  gnb1 is blocking on RecvMsg() for the release;
+    // we keep connFd open and send it once receivePathSwitchRequestAcknowledge
+    // signals us via notifyPathSwitchComplete().
     std::string sessStr   = JsonGetString(msg, "sessions");
     std::string amfUeStr2 = JsonGetString(msg, "amfUeNgapId");
 
+    bool pswTriggered = false;
     if (!sessStr.empty() && !amfUeStr2.empty())
     {
         auto nm = std::make_unique<NmGnbXnToNgap>(NmGnbXnToNgap::TRIGGER_PATH_SWITCH);
@@ -316,7 +306,6 @@ void XnTask::handleConnection(int connFd)
                 remaining.clear();
             }
 
-            // Split: psi , upTeid , upAddrHex , qfisStr
             size_t p0 = 0, p1 = entry.find(',', p0);
             if (p1 == std::string::npos) continue;
             NmGnbXnToNgap::SessionInfo si;
@@ -356,10 +345,45 @@ void XnTask::handleConnection(int connFd)
 
         if (!nm->sessions.empty())
         {
+            // Arm the latch before pushing so the signal can't be missed.
+            {
+                std::lock_guard<std::mutex> lk(m_pswMu);
+                m_pswDone = false;
+            }
             m_base->ngapTask->push(std::move(nm));
             logger->info("Xn: NGAP PathSwitchRequest triggered for amfUeId=%s", amfUeStr2.c_str());
+            pswTriggered = true;
         }
     }
+
+    // ── Wait for PathSwitchRequestAcknowledge ─────────────────────────────────
+    if (pswTriggered)
+    {
+        std::unique_lock<std::mutex> lk(m_pswMu);
+        if (!m_pswCv.wait_for(lk, std::chrono::seconds(10), [this] { return m_pswDone; }))
+            logger->err("Xn: timed out waiting for PathSwitchRequestAcknowledge");
+    }
+
+    // ── UeContextRelease → source gNB ─────────────────────────────────────────
+    // AMF path is now switched; safe to tell gnb1 to release its UE context.
+    std::string ctxRelease =
+        "{\"type\":\"UeContextRelease\""
+        ",\"ueId\":"    + ueIdStr +
+        ",\"cause\":\"successful_handover\""
+        "}";
+
+    SendMsg(connFd, ctxRelease);
+    logger->info("Xn: UeContextRelease sent to source gNB | ue=%d", ueId);
+    ::close(connFd);
+}
+
+void XnTask::notifyPathSwitchComplete()
+{
+    {
+        std::lock_guard<std::mutex> lk(m_pswMu);
+        m_pswDone = true;
+    }
+    m_pswCv.notify_one();
 }
 
 } // namespace nr::gnb

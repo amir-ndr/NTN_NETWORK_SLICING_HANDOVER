@@ -13,6 +13,7 @@
 
 #include <arpa/inet.h>
 #include <cstring>
+#include <fstream>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -237,6 +238,17 @@ void NgapTask::triggerXnHandover(int ueId, const std::string &targetGnbAddress,
                    (unsigned long long)(t3 - t2),
                    (unsigned long long)(t4 - t3),
                    (unsigned long long)(t4 - t1));
+
+    // Append one row per handover: sst,prep_psw_ms,ue_switch_ms,release_ms,total_ms
+    {
+        std::ofstream csv("/home/amirndr/5g-lab/xn_ho_latency.csv", std::ios::app);
+        if (csv.is_open())
+            csv << sliceSst << ","
+                << (t2 - t1) << ","
+                << (t3 - t2) << ","
+                << (t4 - t3) << ","
+                << (t4 - t1) << "\n";
+    }
 }
 
 } // namespace nr::gnb

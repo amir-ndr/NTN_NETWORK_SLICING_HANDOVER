@@ -31,8 +31,7 @@ imeiSv: '4370816125816151'
 
 # List of gNB IP addresses for Radio Link Simulation
 gnbSearchList:
-  - 127.0.0.1    # gnb1 (source)
-  - 127.0.0.2    # gnb2 (target)
+  - 127.0.0.1    # gnb1 (source); gnb2 omitted so UE always starts on gnb1
 
 # UAC Access Identities Configuration
 uacAic:

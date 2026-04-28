@@ -82,3 +82,34 @@ In Terminal 2 (xn_server.py):
 [Xn] XnHandoverRequest received: {"type": "XnHandoverRequest", "ueId": 1, ...}
 [Xn] XnHandoverAck sent for UE 1
 ----------------------------
+
+Step 1 — Start the network (3 terminals):
+
+
+# Terminal 1
+sudo ./build/nr-gnb -c config/gnb1.yaml
+
+# Terminal 2
+sudo ./build/nr-gnb -c config/gnb2.yaml
+Step 2 — Run the experiment:
+
+
+cd /home/amirndr/5g-lab
+python3 experiment_b1.py 50
+Each iteration takes ~8s (2s HO + 6s block/cleanup), so 50 runs ≈ 7 minutes. Each run appends one row to /tmp/xn_ho_latency.csv:
+
+
+sst, prep_psw_ms, ue_switch_ms, release_ms, total_ms
+1, 0, 1, 0, 1
+1, 1, 0, 0, 1
+...
+Step 3 — Plot:
+
+
+python3 plot_cdf.py
+# → saves cdf_handover.pdf
+The plot is already structured for all three baselines — when you implement B2 and B3, just run their experiments with the output going to /tmp/xn_ho_latency_b2.csv and _b3.csv, then:
+
+
+python3 plot_cdf.py /tmp/xn_ho_latency.csv /tmp/xn_ho_latency_b2.csv /tmp/xn_ho_latency_b3.csv
+On localhost, all B1 latencies will cluster around 1–3ms (no propagation delay), so the CDF will be a near-vertical line — that's expected and correct. It becomes meaningful once you add simulated ISL propagation delay.

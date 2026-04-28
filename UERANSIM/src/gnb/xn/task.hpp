@@ -9,6 +9,8 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <thread>
 
 namespace nr::gnb
@@ -16,10 +18,6 @@ namespace nr::gnb
 
 struct TaskBase;
 
-// TCP server that accepts incoming Xn handover requests from other gNBs.
-// Runs as a background thread when xnAddress is configured.
-// For each XnHandoverRequest, contacts the dispatcher (PathSwitchRequest)
-// then replies with XnHandoverAck.
 class XnTask
 {
   public:
@@ -29,6 +27,9 @@ class XnTask
     void start();
     void stop();
 
+    // Called by NgapTask when PathSwitchRequestAcknowledge arrives.
+    void notifyPathSwitchComplete();
+
   private:
     void listenerLoop();
     void handleConnection(int connFd);
@@ -37,6 +38,10 @@ class XnTask
     std::thread m_thread;
     std::atomic<bool> m_running{false};
     int m_serverFd{-1};
+
+    std::mutex m_pswMu;
+    std::condition_variable m_pswCv;
+    bool m_pswDone{false};
 };
 
 } // namespace nr::gnb

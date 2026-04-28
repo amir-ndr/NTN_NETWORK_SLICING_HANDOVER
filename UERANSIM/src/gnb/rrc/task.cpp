@@ -66,7 +66,7 @@ void GnbRrcTask::onLoop()
         case NmGnbNgapToRrc::AN_RELEASE: {
             releaseConnection(w.ueId);
             if (w.xnHandover)
-                m_xnHoBlockUntil = utils::CurrentTimeMillis() + 8000;
+                m_xnHoBlockUntil = utils::CurrentTimeMillis() + 5000;
             break;
         }
         case NmGnbNgapToRrc::PAGING:

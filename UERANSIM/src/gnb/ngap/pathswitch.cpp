@@ -8,6 +8,7 @@
 #include "utils.hpp"
 
 #include <gnb/gtp/task.hpp>
+#include <gnb/xn/task.hpp>
 #include <lib/asn/utils.hpp>
 #include <utils/common.hpp>
 
@@ -249,6 +250,10 @@ void NgapTask::receivePathSwitchRequestAcknowledge(int amfId,
                    ue->ctxId, switchedCount);
     m_logger->info("Xn: PathSwitchRequest complete | ue_ctx=%d sessions=%d",
                    ue->ctxId, switchedCount);
+
+    // Signal XnTask that PathSwitch is done so it can send UeContextRelease to gnb1.
+    if (m_base->xnTask)
+        m_base->xnTask->notifyPathSwitchComplete();
 }
 
 } // namespace nr::gnb
