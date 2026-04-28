@@ -24,6 +24,7 @@ CSV_LIVE   = "/home/amirndr/5g-lab/xn_ho_latency.csv"
 CSV_OUT    = "/home/amirndr/5g-lab/xn_ho_latency_b3.csv"
 
 open(CSV_LIVE, "w").close()
+open("/home/amirndr/5g-lab/chain_log_b3.csv", "w").close()
 
 
 def drain_stdout(proc, q):

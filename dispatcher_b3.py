@@ -74,6 +74,10 @@ def handle_client(conn: socket.socket, addr, bregman: BregmanPolyChain,
         # Simulate the actual chain processing delay so gnb2's pswMs reflects it
         time.sleep(total_ms / 1000.0)
 
+        # Sidecar log: per-NF breakdown for bar plot
+        with open("/home/amirndr/5g-lab/chain_log_b3.csv", "a") as f:
+            f.write(f"{amf_ms:.3f},{smf_ms:.3f},{upf_ms:.3f}\n")
+
         reply = {
             "status":         "OK",
             "policy":         "bregman",

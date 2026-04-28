@@ -76,6 +76,10 @@ def handle_client(conn: socket.socket, addr, chain: PolyChain) -> None:
         total_ms, amf_ms, smf_ms, upf_ms = chain.process_chain(amf_idx, smf_idx, upf_idx)
         time.sleep(total_ms / 1000.0)
 
+        # Sidecar log: per-NF breakdown for bar plot
+        with open("/home/amirndr/5g-lab/chain_log_b2.csv", "a") as f:
+            f.write(f"{amf_ms:.3f},{smf_ms:.3f},{upf_ms:.3f}\n")
+
         # ── Build reply ───────────────────────────────────────────────────────
         reply = {
             "status":         "OK",

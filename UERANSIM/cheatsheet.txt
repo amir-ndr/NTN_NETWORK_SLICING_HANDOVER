@@ -113,3 +113,52 @@ The plot is already structured for all three baselines — when you implement B2
 
 python3 plot_cdf.py /tmp/xn_ho_latency.csv /tmp/xn_ho_latency_b2.csv /tmp/xn_ho_latency_b3.csv
 On localhost, all B1 latencies will cluster around 1–3ms (no propagation delay), so the CDF will be a near-vertical line — that's expected and correct. It becomes meaningful once you add simulated ISL propagation delay.
+
+
+# CDF vs Latency experiments -----------------------------------------
+B1 — Fixed mono-chain dispatcher
+
+# Terminal 1
+sudo ./build/nr-gnb -c config/gnb1.yaml
+
+# Terminal 2
+sudo ./build/nr-gnb -c config/gnb2_b1.yaml
+
+# Terminal 3
+python3 dispatcher_b1.py
+
+# Terminal 4
+sudo python3 experiment_b1.py 50
+
+B2 — Random poly-chain dispatcher
+
+# Terminal 1
+cd ~/5g-lab/UERANSIM && sudo ./build/nr-gnb -c config/gnb1.yaml
+
+# Terminal 2  ← different config!
+cd ~/5g-lab/UERANSIM && sudo ./build/nr-gnb -c config/gnb2_b2.yaml
+
+# Terminal 3
+cd ~/5g-lab && python3 dispatcher.py
+
+# Terminal 4
+cd ~/5g-lab && sudo python3 experiment_b2.py 50
+# → saves to xn_ho_latency_b2.csv
+B3 — Bregman online dispatcher
+
+# Terminal 1
+cd ~/5g-lab/UERANSIM && sudo ./build/nr-gnb -c config/gnb1.yaml
+
+# Terminal 2  ← same dispatcher-enabled config as B2
+cd ~/5g-lab/UERANSIM && sudo ./build/nr-gnb -c config/gnb2_b3.yaml
+
+# Terminal 3  ← different dispatcher!
+cd ~/5g-lab && python3 dispatcher_b3.py
+
+# Terminal 4
+cd ~/5g-lab && sudo python3 experiment_b3.py 50
+# → saves to xn_ho_latency_b3.csv
+Plot all three
+
+cd ~/5g-lab && python3 plot_cdf.py
+# reads b1.csv, b2.csv, b3.csv → saves cdf_handover.pdf

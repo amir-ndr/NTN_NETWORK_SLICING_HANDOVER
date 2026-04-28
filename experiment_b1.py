@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """
-B1 baseline experiment: run N Xn handovers, collect latencies to /tmp/xn_ho_latency.csv
+B1 experiment: fixed mono-chain dispatcher. Runs N Xn handovers,
+writes latencies to xn_ho_latency_b1.csv.
 
-Prerequisites (run in separate terminals before this script):
+All three baselines (B1/B2/B3) use the same dispatcher framework so the
+comparison is fair. B1 always picks AMF[2]+SMF[2]+UPF[2] (fixed, middle-tier).
+
+Prerequisites — run in separate terminals BEFORE this script:
   sudo ./build/nr-gnb -c config/gnb1.yaml
-  sudo ./build/nr-gnb -c config/gnb2.yaml
+  sudo ./build/nr-gnb -c config/gnb2_b1.yaml   ← dispatcher-enabled config
+  python3 dispatcher_b1.py                       ← B1 fixed mono-chain dispatcher
 
-Run this script with sudo (nr-ue needs root to create the TUN interface):
+Run:
   sudo python3 experiment_b1.py [N]   (default N=50)
 """
 
@@ -22,6 +27,7 @@ CSV_LIVE   = "/home/amirndr/5g-lab/xn_ho_latency.csv"
 CSV_OUT    = "/home/amirndr/5g-lab/xn_ho_latency_b1.csv"
 
 open(CSV_LIVE, "w").close()
+open("/home/amirndr/5g-lab/chain_log_b1.csv", "w").close()
 
 def drain_stdout(proc, q):
     """Read all stdout lines into a queue; put None on EOF."""
@@ -111,8 +117,8 @@ for i in range(N):
         capture_output=True, text=True,
     )
 
-    # Wait for HO to complete and CSV row to be written
-    time.sleep(2)
+    # B1 dispatcher adds ~17ms chain latency; give enough time for HO + CSV write
+    time.sleep(4)
 
     ue.terminate()
     ue.wait()

@@ -23,8 +23,9 @@ N          = int(sys.argv[1]) if len(sys.argv) > 1 else 50
 CSV_LIVE   = "/home/amirndr/5g-lab/xn_ho_latency.csv"
 CSV_OUT    = "/home/amirndr/5g-lab/xn_ho_latency_b2.csv"
 
-# Clear live CSV; final results go to CSV_OUT
+# Clear live CSV and sidecar log; final results go to CSV_OUT
 open(CSV_LIVE, "w").close()
+open("/home/amirndr/5g-lab/chain_log_b2.csv", "w").close()
 
 
 def drain_stdout(proc, q):
