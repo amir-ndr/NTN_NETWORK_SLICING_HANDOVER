@@ -28,6 +28,7 @@ CSV_OUT    = "/home/amirndr/5g-lab/xn_ho_latency_b1.csv"
 
 open(CSV_LIVE, "w").close()
 open("/home/amirndr/5g-lab/chain_log_b1.csv", "w").close()
+open("/home/amirndr/5g-lab/backlog_log_b1.csv", "w").close()
 
 def drain_stdout(proc, q):
     """Read all stdout lines into a queue; put None on EOF."""

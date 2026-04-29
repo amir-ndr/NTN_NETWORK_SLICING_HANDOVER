@@ -5,160 +5,50 @@ sudo systemctl restart open5gs-nrfd open5gs-scpd open5gs-amfd \
     open5gs-smfd open5gs-upfd open5gs-ausfd open5gs-udmd \
     open5gs-udrd open5gs-pcfd open5gs-bsfd
 
-# Step 2 — wait 5 seconds, then start gNB1
-build/nr-gnb -c config/gnb1.yaml
+-----------------------------------
+Make sure Open5GS AMF/SMF/UPF are running, then build UERANSIM if not already done.
 
-# Step 3 — start gNB2
-build/nr-gnb -c config/gnb2.yaml
-
-# Step 4 — wait for both to show "NG Setup procedure is successful"
-# THEN start UE
-sudo build/nr-ue -c config/ue1.yaml
-
-# Step 5 — create dummy interface
-sudo ip link add dummy0 type dummy
-sudo ip link set dummy0 up
-sudo ip addr add 10.99.0.1/24 dev dummy0
-
-# Step 6 — start monitor
-python3 ho_monitor.py
-
-#step 7
-sudo tc qdisc add dev dummy0 root netem delay 200ms loss 60%
-sudo tc qdisc del dev dummy0 root
-
----------------------------------------------------------
-
-sudo ip link delete dummy0
-
-touch /tmp/degrade_signal
-To restore:
-bashrm /tmp/degrade_signal
+B1 — Fixed Mono-Chain
+Terminal 1 (gnb1):
 
 
--------------------------------------------Xn-based HO-phase1-------------------------------
-
-Terminal 1
-# verify it's up
-sudo systemctl status open5gs-amfd
-
-Terminal 2
-# Need to add loopback alias for 127.0.0.2 if not already there
-sudo ip addr add 127.0.0.2/8 dev lo 2>/dev/null || true
-
-python3 ~/5g-lab/scripts/xn_server.py --host 127.0.0.2 --port 38422
-
-
-Terminal 3 — Source gNB (gnb1)
-
-cd ~/5g-lab/UERANSIM
-./build/nr-gnb -c config/gnb1.yaml
-
-Terminal 4 — UE
-
-
-cd ~/5g-lab/UERANSIM
-sudo ./build/nr-ue -c config/ue1.yaml
-Terminal 5 — Trigger handover manually
-
-
-cd ~/5g-lab/UERANSIM
-
-# First check UE ID
-./build/nr-cli UERANSIM-gnb-999-70-1 --exec "ue-list"
-
-# Then trigger Xn handover: ue-id=1, target=127.0.0.2, port=38422, sst=1
-./build/nr-cli UERANSIM-gnb-999-70-1 --exec "xn-handover 1 127.0.0.2 38422 1"
-
-What You Should See:
-
-In Terminal 3 (source gNB logs):
-
-
-Xn handover latency | ue=1 sst=1 | xn-prep=Xms psw=0ms release=Yms total=Zms
-In Terminal 2 (xn_server.py):
-
-
-[Xn] XnHandoverRequest received: {"type": "XnHandoverRequest", "ueId": 1, ...}
-[Xn] XnHandoverAck sent for UE 1
-----------------------------
-
-Step 1 — Start the network (3 terminals):
-
-
-# Terminal 1
+cd /home/amirndr/5g-lab/UERANSIM
 sudo ./build/nr-gnb -c config/gnb1.yaml
+Terminal 2 (gnb2 for B1):
 
-# Terminal 2
-sudo ./build/nr-gnb -c config/gnb2.yaml
-Step 2 — Run the experiment:
+
+cd /home/amirndr/5g-lab/UERANSIM
+sudo ./build/nr-gnb -c config/gnb2_b1.yaml
+Terminal 3 (dispatcher B1):
 
 
 cd /home/amirndr/5g-lab
-python3 experiment_b1.py 50
-Each iteration takes ~8s (2s HO + 6s block/cleanup), so 50 runs ≈ 7 minutes. Each run appends one row to /tmp/xn_ho_latency.csv:
-
-
-sst, prep_psw_ms, ue_switch_ms, release_ms, total_ms
-1, 0, 1, 0, 1
-1, 1, 0, 0, 1
-...
-Step 3 — Plot:
-
-
-python3 plot_cdf.py
-# → saves cdf_handover.pdf
-The plot is already structured for all three baselines — when you implement B2 and B3, just run their experiments with the output going to /tmp/xn_ho_latency_b2.csv and _b3.csv, then:
-
-
-python3 plot_cdf.py /tmp/xn_ho_latency.csv /tmp/xn_ho_latency_b2.csv /tmp/xn_ho_latency_b3.csv
-On localhost, all B1 latencies will cluster around 1–3ms (no propagation delay), so the CDF will be a near-vertical line — that's expected and correct. It becomes meaningful once you add simulated ISL propagation delay.
-
-
-# CDF vs Latency experiments -----------------------------------------
-B1 — Fixed mono-chain dispatcher
-
-# Terminal 1
-sudo ./build/nr-gnb -c config/gnb1.yaml
-
-# Terminal 2
-sudo ./build/nr-gnb -c config/gnb2_b1.yaml
-
-# Terminal 3
 python3 dispatcher_b1.py
+Terminal 4 (experiment):
 
-# Terminal 4
+
+cd /home/amirndr/5g-lab
 sudo python3 experiment_b1.py 50
 
-B2 — Random poly-chain dispatcher
+B2 — Random Poly-Chain
+Kill gnb2 + dispatcher, restart with B2 config:
 
-# Terminal 1
-cd ~/5g-lab/UERANSIM && sudo ./build/nr-gnb -c config/gnb1.yaml
+Terminal 2: sudo ./build/nr-gnb -c config/gnb2_b2.yaml
 
-# Terminal 2  ← different config!
-cd ~/5g-lab/UERANSIM && sudo ./build/nr-gnb -c config/gnb2_b2.yaml
+Terminal 3: python3 dispatcher.py
 
-# Terminal 3
-cd ~/5g-lab && python3 dispatcher.py
+Terminal 4: sudo python3 experiment_b2.py 50
 
-# Terminal 4
-cd ~/5g-lab && sudo python3 experiment_b2.py 50
-# → saves to xn_ho_latency_b2.csv
-B3 — Bregman online dispatcher
+B3 — Bregman Online
+Terminal 2: sudo ./build/nr-gnb -c config/gnb2_b3.yaml
 
-# Terminal 1
-cd ~/5g-lab/UERANSIM && sudo ./build/nr-gnb -c config/gnb1.yaml
+Terminal 3: python3 dispatcher_b3.py
 
-# Terminal 2  ← same dispatcher-enabled config as B2
-cd ~/5g-lab/UERANSIM && sudo ./build/nr-gnb -c config/gnb2_b3.yaml
+Terminal 4: sudo python3 experiment_b3.py 50
 
-# Terminal 3  ← different dispatcher!
-cd ~/5g-lab && python3 dispatcher_b3.py
+Plots (after all three experiments)
 
-# Terminal 4
-cd ~/5g-lab && sudo python3 experiment_b3.py 50
-# → saves to xn_ho_latency_b3.csv
-Plot all three
-
-cd ~/5g-lab && python3 plot_cdf.py
-# reads b1.csv, b2.csv, b3.csv → saves cdf_handover.pdf
+cd /home/amirndr/5g-lab
+python3 plot_cdf.py          # → handover_latency_cdf.pdf
+python3 plot_breakdown.py    # → breakdown_handover.pdf
+python3 plot_backlog_exp.py # -> queue backlog

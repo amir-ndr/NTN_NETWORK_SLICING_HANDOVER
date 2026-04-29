@@ -26,6 +26,7 @@ CSV_OUT    = "/home/amirndr/5g-lab/xn_ho_latency_b2.csv"
 # Clear live CSV and sidecar log; final results go to CSV_OUT
 open(CSV_LIVE, "w").close()
 open("/home/amirndr/5g-lab/chain_log_b2.csv", "w").close()
+open("/home/amirndr/5g-lab/backlog_log_b2.csv", "w").close()
 
 
 def drain_stdout(proc, q):

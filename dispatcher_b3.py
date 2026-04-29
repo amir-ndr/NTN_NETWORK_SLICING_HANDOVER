@@ -18,7 +18,7 @@ Usage:
 """
 
 import socket, struct, json, threading, time, sys, argparse
-from nf_chain import PolyChain, BregmanPolyChain, N_INSTANCES
+from nf_chain import PolyChain, BregmanPolyChain, QueueTracker, N_INSTANCES, AMF_MU_MS, SMF_MU_MS, UPF_MU_MS
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 9000
@@ -49,7 +49,9 @@ def send_msg(conn: socket.socket, msg: str) -> None:
 
 
 def handle_client(conn: socket.socket, addr, bregman: BregmanPolyChain,
-                  lock: threading.Lock, stats: dict) -> None:
+                  lock: threading.Lock, stats: dict,
+                  qt_amf: QueueTracker, qt_smf: QueueTracker,
+                  qt_upf: QueueTracker) -> None:
     try:
         raw = recv_msg(conn)
         if not raw:
@@ -71,12 +73,24 @@ def handle_client(conn: socket.socket, addr, bregman: BregmanPolyChain,
             p_smf = bregman.amf_selector.probabilities()
             p_upf = bregman.smf_selector.probabilities()
 
+            # Sidecar log: per-NF breakdown for bar plot
+            with open("/home/amirndr/5g-lab/chain_log_b3.csv", "a") as f:
+                f.write(f"{amf_ms:.3f},{smf_ms:.3f},{upf_ms:.3f}\n")
+
+            # Queue backlog: advance all 3 trackers then snapshot all 15 depths
+            # Format: t,amf_idx,smf_idx,upf_idx,amf0..4,smf0..4,upf0..4
+            qt_amf.step(amf_idx)
+            qt_smf.step(smf_idx)
+            qt_upf.step(upf_idx)
+            bl_row = ([t, amf_idx, smf_idx, upf_idx]
+                      + qt_amf.state()
+                      + qt_smf.state()
+                      + qt_upf.state())
+            with open("/home/amirndr/5g-lab/backlog_log_b3.csv", "a") as f:
+                f.write(",".join(f"{v:.4f}" for v in bl_row) + "\n")
+
         # Simulate the actual chain processing delay so gnb2's pswMs reflects it
         time.sleep(total_ms / 1000.0)
-
-        # Sidecar log: per-NF breakdown for bar plot
-        with open("/home/amirndr/5g-lab/chain_log_b3.csv", "a") as f:
-            f.write(f"{amf_ms:.3f},{smf_ms:.3f},{upf_ms:.3f}\n")
 
         reply = {
             "status":         "OK",
@@ -121,6 +135,9 @@ def main():
     bregman = BregmanPolyChain(chain, eta=args.eta)
     lock    = threading.Lock()
     stats   = {"t": 0}
+    qt_amf  = QueueTracker(AMF_MU_MS)
+    qt_smf  = QueueTracker(SMF_MU_MS)
+    qt_upf  = QueueTracker(UPF_MU_MS)
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -142,7 +159,7 @@ def main():
         conn, addr = server.accept()
         threading.Thread(
             target=handle_client,
-            args=(conn, addr, bregman, lock, stats),
+            args=(conn, addr, bregman, lock, stats, qt_amf, qt_smf, qt_upf),
             daemon=True,
         ).start()
 

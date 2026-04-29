@@ -19,7 +19,7 @@ Usage:
 """
 
 import socket, struct, json, threading, time, argparse
-from nf_chain import PolyChain
+from nf_chain import PolyChain, QueueTracker, AMF_MU_MS, SMF_MU_MS, UPF_MU_MS
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 9000
@@ -56,7 +56,10 @@ def send_msg(conn: socket.socket, msg: str) -> None:
     conn.sendall(struct.pack(">I", len(data)) + data)
 
 
-def handle_client(conn: socket.socket, addr, chain: PolyChain, stats: dict) -> None:
+def handle_client(conn: socket.socket, addr, chain: PolyChain,
+                  stats: dict, lock: threading.Lock,
+                  qt_amf: QueueTracker, qt_smf: QueueTracker,
+                  qt_upf: QueueTracker) -> None:
     try:
         raw = recv_msg(conn)
         if not raw:
@@ -66,19 +69,32 @@ def handle_client(conn: socket.socket, addr, chain: PolyChain, stats: dict) -> N
         ue_id = req.get("ueId", -1)
         sst   = req.get("sliceSst", 1)
 
-        # ── Fixed selection — always the same chain ───────────────────────────
-        total_ms, amf_ms, smf_ms, upf_ms = chain.process_chain(
-            FIXED_AMF, FIXED_SMF, FIXED_UPF
-        )
+        # ── Fixed selection — always the same chain (lock protects chain state) ─
+        with lock:
+            total_ms, amf_ms, smf_ms, upf_ms = chain.process_chain(
+                FIXED_AMF, FIXED_SMF, FIXED_UPF
+            )
+            stats["t"] += 1
+            t = stats["t"]
 
-        # Simulate chain processing time (same as B2/B3 for fair comparison)
+            # Sidecar log: per-NF breakdown for bar plot
+            with open("/home/amirndr/5g-lab/chain_log_b1.csv", "a") as f:
+                f.write(f"{amf_ms:.3f},{smf_ms:.3f},{upf_ms:.3f}\n")
+
+            # Queue backlog: advance all 3 trackers then snapshot all 15 depths
+            # Format: t,amf_idx,smf_idx,upf_idx,amf0..4,smf0..4,upf0..4
+            qt_amf.step(FIXED_AMF)
+            qt_smf.step(FIXED_SMF)
+            qt_upf.step(FIXED_UPF)
+            bl_row = ([t, FIXED_AMF, FIXED_SMF, FIXED_UPF]
+                      + qt_amf.state()
+                      + qt_smf.state()
+                      + qt_upf.state())
+            with open("/home/amirndr/5g-lab/backlog_log_b1.csv", "a") as f:
+                f.write(",".join(f"{v:.4f}" for v in bl_row) + "\n")
+
+        # Simulate chain processing time outside lock so other threads can proceed
         time.sleep(total_ms / 1000.0)
-
-        # Sidecar log: per-NF breakdown for bar plot
-        with open("/home/amirndr/5g-lab/chain_log_b1.csv", "a") as f:
-            f.write(f"{amf_ms:.3f},{smf_ms:.3f},{upf_ms:.3f}\n")
-
-        stats["t"] += 1
 
         reply = {
             "status":         "OK",
@@ -94,7 +110,7 @@ def handle_client(conn: socket.socket, addr, chain: PolyChain, stats: dict) -> N
         }
         send_msg(conn, json.dumps(reply))
 
-        print(f"  [t={stats['t']:3d}] ue={ue_id} "
+        print(f"  [t={t:3d}] ue={ue_id} "
               f"chain=AMF[{FIXED_AMF}]+SMF[{FIXED_SMF}]+UPF[{FIXED_UPF}]  "
               f"total={total_ms:.1f}ms "
               f"(amf={amf_ms:.1f} smf={smf_ms:.1f} upf={upf_ms:.1f})",
@@ -111,8 +127,12 @@ def main():
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args()
 
-    chain = PolyChain()
-    stats = {"t": 0}
+    chain  = PolyChain()
+    stats  = {"t": 0}
+    lock   = threading.Lock()
+    qt_amf = QueueTracker(AMF_MU_MS)
+    qt_smf = QueueTracker(SMF_MU_MS)
+    qt_upf = QueueTracker(UPF_MU_MS)
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -131,7 +151,9 @@ def main():
     while True:
         conn, addr = server.accept()
         threading.Thread(
-            target=handle_client, args=(conn, addr, chain, stats), daemon=True
+            target=handle_client,
+            args=(conn, addr, chain, stats, lock, qt_amf, qt_smf, qt_upf),
+            daemon=True,
         ).start()
 
 

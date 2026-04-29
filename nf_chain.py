@@ -47,6 +47,12 @@ class NfInstance:
             return service_ms + queue_delay
 
     @property
+    def backlog(self) -> float:
+        """Current queue backlog depth (thread-safe read)."""
+        with self._lock:
+            return self._backlog
+
+    @property
     def cost(self) -> float:
         """Estimated cost L(·) for Bregman algorithm: mean + queue contribution."""
         return self.mu_ms + self._backlog * self.mu_ms * 0.15
@@ -163,6 +169,51 @@ class BregmanLayer:
     def probabilities(self) -> list:
         """Return current selection probabilities (diagnostic)."""
         return self.x
+
+
+class QueueTracker:
+    """
+    Discrete-time queue tracker for per-instance load monitoring across HO rounds.
+
+    Unlike NfInstance._backlog (which is a per-call internal latency model),
+    this tracker correctly captures cross-round queueing dynamics:
+
+      Every round, for EVERY instance i:
+          Q_i[t+1] = Q_i[t] * decay                 # background service (idle drain)
+
+      For the SELECTED instance i* only:
+          Q_i*[t+1] += mu_ms[i*] / scale            # new load ∝ service time
+
+    This means:
+      - Idle instances drain toward 0 (correctly modelled)
+      - Slower instances accumulate MORE backlog per selection (proportional to μ_i)
+      - B1 fixed on mid-tier → high backlog on that slow instance
+      - B3 converging to fast instance → low backlog across all instances
+
+    Parameters
+    ----------
+    mu_ms  : list of mean service times per instance (ms)
+    decay  : per-round retention factor (0 < decay < 1).
+             decay=0.85 → 15% drained per round; reflects inter-HO idle service.
+    scale  : load increment divisor. mu_ms[i]/scale added per selection.
+             scale=5.0 → mid-tier AMF[2] (8ms) adds 1.6 units/round when always selected
+             → steady-state Q = 1.6/(1-0.85) ≈ 10.7  (clearly non-zero, comparable to μ)
+    """
+
+    def __init__(self, mu_ms: list, decay: float = 0.85, scale: float = 5.0):
+        self.mu_ms = list(mu_ms)
+        self.decay = decay
+        self.scale = scale
+        self._q    = [0.0] * len(mu_ms)
+
+    def step(self, selected_idx: int) -> None:
+        """One HO round: drain all instances, add load to the selected one."""
+        self._q = [qi * self.decay for qi in self._q]
+        self._q[selected_idx] += self.mu_ms[selected_idx] / self.scale
+
+    def state(self) -> list:
+        """Current queue depth for all instances (copy)."""
+        return list(self._q)
 
 
 class BregmanPolyChain:

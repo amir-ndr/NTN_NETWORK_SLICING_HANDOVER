@@ -20,7 +20,7 @@ Usage:
 """
 
 import socket, struct, json, threading, time, sys, argparse
-from nf_chain import PolyChain
+from nf_chain import PolyChain, QueueTracker, AMF_MU_MS, SMF_MU_MS, UPF_MU_MS
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 9000
@@ -53,32 +53,51 @@ def send_msg(conn: socket.socket, msg: str) -> None:
     conn.sendall(struct.pack(">I", len(data)) + data)
 
 
-def handle_client(conn: socket.socket, addr, chain: PolyChain) -> None:
+def handle_client(conn: socket.socket, addr, chain: PolyChain,
+                  stats: dict, lock: threading.Lock,
+                  qt_amf: QueueTracker, qt_smf: QueueTracker,
+                  qt_upf: QueueTracker) -> None:
     try:
         raw = recv_msg(conn)
         if not raw:
             return
 
         req = json.loads(raw)
-        sst     = req.get("sliceSst", 1)
-        ue_id   = req.get("ueId", -1)
+        sst      = req.get("sliceSst", 1)
+        ue_id    = req.get("ueId", -1)
         req_type = req.get("type", "")
 
-        # ── Select chain ──────────────────────────────────────────────────────
-        if POLICY == "random":
-            amf_idx, smf_idx, upf_idx = chain.random_select()
-        else:
-            raise ValueError(f"Unknown policy: {POLICY}")
+        # ── Select + process (lock protects chain state and stats counter) ────
+        with lock:
+            if POLICY == "random":
+                amf_idx, smf_idx, upf_idx = chain.random_select()
+            else:
+                raise ValueError(f"Unknown policy: {POLICY}")
 
-        # ── Simulate chain processing ─────────────────────────────────────────
-        # process_chain() returns real ms values; sleep here so gnb2's wall-clock
-        # pswMs measurement captures the actual chain contribution.
-        total_ms, amf_ms, smf_ms, upf_ms = chain.process_chain(amf_idx, smf_idx, upf_idx)
+            total_ms, amf_ms, smf_ms, upf_ms = chain.process_chain(
+                amf_idx, smf_idx, upf_idx
+            )
+            stats["t"] += 1
+            t = stats["t"]
+
+            # Sidecar log: per-NF breakdown for bar plot
+            with open("/home/amirndr/5g-lab/chain_log_b2.csv", "a") as f:
+                f.write(f"{amf_ms:.3f},{smf_ms:.3f},{upf_ms:.3f}\n")
+
+            # Queue backlog: advance all 3 trackers then snapshot all 15 depths
+            # Format: t,amf_idx,smf_idx,upf_idx,amf0..4,smf0..4,upf0..4
+            qt_amf.step(amf_idx)
+            qt_smf.step(smf_idx)
+            qt_upf.step(upf_idx)
+            bl_row = ([t, amf_idx, smf_idx, upf_idx]
+                      + qt_amf.state()
+                      + qt_smf.state()
+                      + qt_upf.state())
+            with open("/home/amirndr/5g-lab/backlog_log_b2.csv", "a") as f:
+                f.write(",".join(f"{v:.4f}" for v in bl_row) + "\n")
+
+        # Simulate chain processing time outside lock
         time.sleep(total_ms / 1000.0)
-
-        # Sidecar log: per-NF breakdown for bar plot
-        with open("/home/amirndr/5g-lab/chain_log_b2.csv", "a") as f:
-            f.write(f"{amf_ms:.3f},{smf_ms:.3f},{upf_ms:.3f}\n")
 
         # ── Build reply ───────────────────────────────────────────────────────
         reply = {
@@ -95,7 +114,7 @@ def handle_client(conn: socket.socket, addr, chain: PolyChain) -> None:
         }
         send_msg(conn, json.dumps(reply))
 
-        print(f"  [HO] ue={ue_id} sst={sst} "
+        print(f"  [t={t:3d}] ue={ue_id} sst={sst} "
               f"chain=AMF[{amf_idx}]+SMF[{smf_idx}]+UPF[{upf_idx}] "
               f"total={total_ms:.1f}ms "
               f"(amf={amf_ms:.1f} smf={smf_ms:.1f} upf={upf_ms:.1f})",
@@ -112,7 +131,12 @@ def main():
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args()
 
-    chain = PolyChain()
+    chain  = PolyChain()
+    stats  = {"t": 0}
+    lock   = threading.Lock()
+    qt_amf = QueueTracker(AMF_MU_MS)
+    qt_smf = QueueTracker(SMF_MU_MS)
+    qt_upf = QueueTracker(UPF_MU_MS)
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -130,7 +154,9 @@ def main():
     while True:
         conn, addr = server.accept()
         threading.Thread(
-            target=handle_client, args=(conn, addr, chain), daemon=True
+            target=handle_client,
+            args=(conn, addr, chain, stats, lock, qt_amf, qt_smf, qt_upf),
+            daemon=True,
         ).start()
 
 
